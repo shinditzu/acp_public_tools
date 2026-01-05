@@ -1,0 +1,108 @@
+# https://docs.ansible.com/projects/ansible/latest/collections/cisco/aci/aci_interface_config_module.html
+# 
+# SHUT - run with ansible-playbook interface_state_csv.yaml --tags shutdown
+# NO_SHUT - run with ansible-playbook interface_state_csv.yaml --tags no_shutdown
+# Can replace vars in "aci_login" anchor below with static values and comment out vars if needed.
+
+---
+- name: Control ACI Interface State from CSV
+  hosts: localhost
+  gather_facts: no
+  connection: local
+
+  vars_prompt:
+    - name: aci_hostname
+      prompt: "Enter ACI Fabric IP/Hostname"
+      private: no
+
+    - name: aci_username
+      prompt: "Enter Username"
+      private: no
+
+    - name: aci_password
+      prompt: "Enter Password"
+      private: yes
+
+  vars:
+    csv_file: "interfaces.csv"
+
+    aci_creds: &aci_login
+      hostname: "{{ aci_hostname }}"
+      use_proxy: no
+      use_ssl: yes
+      username: "{{ aci_username }}"
+      password: "{{ aci_password }}"
+      validate_certs: no
+  
+  tasks:
+    - name: Read interface list from CSV
+      read_csv:
+        path: "{{ csv_file }}"
+      register: interface_data
+      delegate_to: localhost
+      tags:
+        - always
+
+
+    - name: Disable Interface
+      cisco.aci.aci_interface_blacklist:
+        <<: *aci_login
+        pod_id: "{{ item.pod }}"
+        node_id: "{{ item.node_id }}"
+        interface: "{{ item.interface }}"
+        state: present
+      loop: "{{ interface_data.list | selectattr('node_id', 'defined') | selectattr('node_id') | list }}"
+      loop_control:
+        label: "Node {{ item.node_id }} - Interface {{ item.interface }}"
+      tags:
+        - shutdown
+        - never
+
+    - name: Enable Interface
+      cisco.aci.aci_interface_blacklist:
+        <<: *aci_login
+        pod_id: "{{ item.pod }}"
+        node_id: "{{ item.node_id }}"
+        interface: "{{ item.interface }}"
+        state: absent
+      loop: "{{ interface_data.list | selectattr('node_id', 'defined') | selectattr('node_id') | list }}"
+      loop_control:
+        label: "Node {{ item.node_id }} - Interface {{ item.interface }}"
+      tags:
+        - no_shutdown
+        - never
+
+    - name: Pause to allow interfaces to stabilize
+      pause:
+        seconds: 10
+        prompt: "Waiting for interfaces to come up..."
+      tags:
+        - no_shutdown
+        - shutdown
+        - never
+
+    - name: Query interface operational state
+      cisco.aci.aci_rest:
+        <<: *aci_login
+        path: "/api/node/mo/topology/pod-{{ item.pod }}/node-{{ item.node_id }}/sys/phys-[eth{{ item.interface }}].json?query-target=children&target-subtree-class=ethpmPhysIf"
+        method: get
+      loop: "{{ interface_data.list | selectattr('node_id', 'defined') | selectattr('node_id') | list }}"
+      register: interface_status
+      loop_control:
+        label: "Node {{ item.node_id }} - Interface {{ item.interface }}"
+      tags:
+        - always
+
+    - name: Display interface operational state
+      debug:
+        msg:
+          - "Interface: eth{{ item.item.interface }}"
+          - "Node: {{ item.item.node_id }} (Pod {{ item.item.pod }})"
+          - "Admin State: {{ 'Shutdown (blacklisted)' if (item.imdata | length > 0 and 'blacklist' in item.imdata[0].ethpmPhysIf.attributes.usage) else 'Enabled' }}"
+          - "Operational State: {{ item.imdata[0].ethpmPhysIf.attributes.operSt | default('unknown') if item.imdata | length > 0 else 'no data' }}"
+          - "State Qualifier: {{ item.imdata[0].ethpmPhysIf.attributes.operStQual | default('N/A') if item.imdata | length > 0 else 'N/A' }}"
+      loop: "{{ interface_status.results }}"
+      loop_control:
+        label: "Node {{ item.item.node_id }} - eth{{ item.item.interface }}"
+      tags:
+        - always
