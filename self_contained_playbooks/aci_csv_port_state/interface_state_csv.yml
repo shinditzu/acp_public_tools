@@ -1,5 +1,5 @@
-# https://docs.ansible.com/projects/ansible/latest/collections/cisco/aci/aci_interface_config_module.html
-# 
+# Populate interfaces.csv with pod, node_id, interface.
+#
 # SHUT - run with ansible-playbook interface_state_csv.yaml --tags shutdown
 # NO_SHUT - run with ansible-playbook interface_state_csv.yaml --tags no_shutdown
 # Can replace vars in "aci_login" anchor below with static values and comment out vars if needed.
