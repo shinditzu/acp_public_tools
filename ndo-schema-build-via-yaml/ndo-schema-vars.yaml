@@ -1,4 +1,4 @@
-# This file contains non-dynamic schema data for the LDA environment
+# This file contains non-dynamic schema data
 ndo_schema_data:
   schemas:
   - name: test_schema
