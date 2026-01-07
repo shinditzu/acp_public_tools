@@ -1,0 +1,154 @@
+#https://galaxy.ansible.com/ui/repo/published/cisco/nd/content/module/nd_site/
+
+- name: ND Schema Deploy
+  hosts: "{{ target_host | default('nd_3') }}"
+  connection: local
+  gather_facts: no
+
+  vars:
+    target_schema: "{{ schema | default('all') }}"
+
+    nd_creds: &nd_login
+      hostname: '{{ ansible_host }}'
+      use_proxy: no
+      use_ssl: yes
+      username: '{{ ansible_username }}'
+      password: '{{ ansible_password }}'
+      validate_certs: no
+    ansible_connection: ansible.netcommon.httpapi
+    ansible_network_os: cisco.nd.nd
+    ansible_httpapi_use_ssl: True
+  
+  tasks:
+  - name: Debug - Show connection variables
+    debug:
+      msg:
+        - "Inventory hostname: {{ inventory_hostname }}"
+        - "Ansible host: {{ ansible_host }}"
+        - "Username: {{ ansible_username }}"
+        - "Schema filter: {{ schema | default('all') }}"
+    when:
+      - schema is defined
+    tags: debug
+
+  # ============================================================
+  # DEPLOYMENT TASKS
+  # ============================================================
+
+
+  - name: Query all schemas
+    cisco.mso.mso_schema:
+      <<: *nd_login
+      state: query
+    delegate_to: localhost
+    register: query_result
+    tags: 
+      - debug
+      - deploy
+
+  - name: Debug - Show query result
+    debug:
+      var: query_result
+    when: query_result is defined
+    tags: debug
+
+  - name: Extract schemas and templates for processing
+    set_fact:
+      filtered_schemas: "{% if target_schema == 'all' %}{{ query_result.current | default([]) }}{% else %}{{ query_result.current | default([]) | selectattr('displayName', 'equalto', target_schema) | list }}{% endif %}"
+    when: 
+      - query_result is defined
+      - query_result.current is defined
+    tags: 
+      - debug
+      - deploy
+
+  - name: Display extracted schemas and templates
+    debug:
+      var: filtered_schemas
+    when: filtered_schemas is defined
+    tags: debug
+
+  - name: Query template deployment status
+    cisco.mso.ndo_schema_template_deploy:
+      <<: *nd_login
+      schema: "{{ item.0.displayName }}"
+      template: "{{ item.1.name }}"
+      state: query
+    delegate_to: localhost
+    loop: "{{ filtered_schemas | subelements('templates') }}"
+    loop_control:
+      label: "{{ item.0.displayName }}/{{ item.1.name }}"
+    register: template_status
+    ignore_errors: yes
+    when: filtered_schemas is defined
+    tags:
+      - deploy
+      - debug
+
+  - name: Debug - Show raw deployment query response
+    debug:
+      msg:
+        - "Schema: {{ item.item.0.displayName }}"
+        - "Template: {{ item.item.1.name }}"
+        - "Template Version: {{ item.item.1.version | default('unknown') }}"
+        - "Top-level schemaversion: '{{ item.current.schemaversion | default('') }}'"
+        - "Total Sites: {{ item.current.status | default([]) | length }}"
+        - "Site Deployment Versions: {{ item.current.status | default([]) | map(attribute='status.deployedVersion') | list }}"
+        - "Sites out of sync (deployedVersion < template version): {{ item.current.status | default([]) | selectattr('status', 'defined') | selectattr('status.deployedVersion', 'defined') | selectattr('status.deployedVersion', '<', item.item.1.version | default(0)) | list | length }}"
+    loop: "{{ template_status.results | default([]) }}"
+    loop_control:
+      label: "{{ item.item.0.displayName }}/{{ item.item.1.name }}"
+    when: template_status is defined
+    tags: debug
+
+  - name: Set deployment status facts
+    set_fact:
+      deployment_status: >-
+        {{ deployment_status | default([]) + [{
+          'schema': item.item.0.displayName,
+          'template': item.item.1.name,
+          'template_version': item.item.1.version | default(0),
+          'is_deployed': (item.current.status | default([]) | length > 0),
+          'is_out_of_sync': ((item.current.schemaversion | default('') != '') or (item.current.status | default([]) | selectattr('status', 'defined') | selectattr('status.deployedVersion', 'defined') | selectattr('status.deployedVersion', '<', item.item.1.version | default(0)) | list | length > 0)),
+          'needs_deployment': ((item.current.status | default([]) | length == 0) or (item.current.schemaversion | default('') != '') or (item.current.status | default([]) | selectattr('status', 'defined') | selectattr('status.deployedVersion', 'defined') | selectattr('status.deployedVersion', '<', item.item.1.version | default(0)) | list | length > 0)),
+          'out_of_sync_sites': (item.current.status | default([]) | selectattr('status', 'defined') | selectattr('status.deployedVersion', 'defined') | selectattr('status.deployedVersion', '<', item.item.1.version | default(0)) | map(attribute='siteId') | list)
+        }] }}
+    loop: "{{ template_status.results }}"
+    when:
+      - template_status is defined
+      - template_status.results is defined
+      - template_status.results | length > 0
+    tags:
+      - deploy
+      - debug
+
+  - name: Show deployment status
+    debug:
+      msg: 
+        - "Schema: {{ item.schema }}/{{ item.template }}"
+        - "Template Version: {{ item.template_version }}"
+        - "Deployed: {{ item.is_deployed }}"
+        - "Out of Sync: {{ item.is_out_of_sync }}"
+        - "Out of Sync Sites: {{ item.out_of_sync_sites | default([]) | length }}"
+        - "Needs Deployment: {{ item.needs_deployment }}"
+    loop: "{{ deployment_status | default([]) }}"
+    when:
+      - deployment_status is defined
+    tags:
+      - deploy
+      - debug
+
+  - name: Deploy out-of-sync or undeployed templates (smart/incremental)
+    cisco.mso.ndo_schema_template_deploy:
+      <<: *nd_login
+      schema: "{{ item.schema }}"
+      template: "{{ item.template }}"
+      state: deploy
+    delegate_to: localhost
+    loop: "{{ deployment_status | default([]) }}"
+    loop_control:
+      label: "{{ item.schema }}/{{ item.template }}"
+    when:
+      - deployment_status is defined
+      - item.needs_deployment | default(false)
+    tags: deploy

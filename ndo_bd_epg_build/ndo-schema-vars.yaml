@@ -1,0 +1,65 @@
+# This file contains non-dynamic schema data for the LDA environment
+ndo_schema_data:
+  schemas:
+  - name: test_schema
+    template: test_template
+  vrfs:
+  - name: test_vrf
+    schema: test_schema
+    template: test_template
+
+  bridge_domains:
+  - name: test_bd1
+    schema: test_schema
+    template: test_template
+    vrf: test_vrf
+    layer2_stretch: false
+    unicast_routing: true
+    sites:
+    - name: sim_site_1
+      subnets:
+        - ip: 2.2.2.2/24
+          scope: public
+      l3outs:
+      #  - Prod_L3OUT
+  - name: test_bd2
+    schema: test_schema
+    template: test_template
+    vrf: test_vrf
+    layer2_stretch: false
+    unicast_routing: true
+    sites:
+    - name: sim_site_1
+      l3outs:
+      #  - Prod_L3OUT
+  - name: test_bd3
+    schema: test_schema
+    template: test_template
+    vrf: test_vrf
+    layer2_stretch: false
+    unicast_routing: true
+    sites:
+    - name: sim_site_1
+      l3outs:
+      #  - Prod_L3OUT
+
+  anps:
+  - name: test_ap
+    schema: test_schema
+    template: test_template
+
+  epgs:
+  - name: test_epg1
+    schema: test_schema
+    template: test_template
+    ap: test_ap
+    bd: test_bd1
+    description: Test EPG
+    vrf: test_vrf
+    #vlan_id: null
+    sites:
+    - name: sim_site_1
+      phys_domain_association:
+      - physical-nodes
+      vmm_domain_association: 
+      - vmm-test-dvs

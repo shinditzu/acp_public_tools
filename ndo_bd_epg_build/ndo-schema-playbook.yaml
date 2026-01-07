@@ -1,0 +1,213 @@
+#https://galaxy.ansible.com/ui/repo/published/cisco/nd/content/module/nd_site/
+
+
+- name: ND Operational Schema Build
+  hosts: localhost
+  gather_facts: no
+  connection: local
+
+  # vars_prompt:
+  #   - name: nd_hostname
+  #     prompt: "Enter ND Fabric IP/Hostname"
+  #     private: no
+
+  #   - name: nd_username
+  #     prompt: "Enter Username"
+  #     private: no
+
+  #   - name: nd_password
+  #     prompt: "Enter Password"
+  #     private: yes
+
+  vars_files:
+    - "ndo-schema-vars.yaml"
+
+  vars:
+    target_state: "{{ state | default('present') }}"
+    schema_data_file: "{{ schema_data | default('ndo_network_schema_data') }}"
+
+    nd_creds: &nd_login
+      hostname: "{{ nd_hostname | default('192.168.15.102') }}" 
+      use_proxy: no
+      use_ssl: yes
+      username: "{{ nd_username | default('admin') }}"
+      password: "{{ nd_password | default('Cisco123!') }}"
+      validate_certs: no
+    ansible_connection: ansible.netcommon.httpapi
+    ansible_network_os: cisco.nd.nd
+    ansible_httpapi_use_ssl: True
+
+  tasks:
+
+  - name: Add/Remove VRFs for selected environment
+    cisco.mso.mso_schema_template_vrf:
+      <<: *nd_login
+      schema: "{{ item.schema }}"
+      template: "{{ item.template }}"
+      vrf: "{{ item.name }}"
+      state: "{{ target_state }}"
+    loop: "{{ ndo_schema_data.vrfs }}"
+    register: schema_results
+    tags: add_vrf
+
+  - name: Add/Remove bridge domains for selected environment
+    cisco.mso.mso_schema_template_bd:
+      <<: *nd_login
+      schema: "{{ item.schema }}"
+      template: "{{ item.template }}"
+      bd: "{{ item.name }}"
+      vrf:
+        name: "{{ item.vrf }}"
+      layer2_stretch: "{{ item.layer2_stretch }}"
+      unicast_routing: "{{ item.unicast_routing }}"
+      state: "{{ target_state }}"
+    loop: "{{ ndo_schema_data.bridge_domains }}"
+    register: schema_results
+    tags: add_bd
+
+  # Flatten the nested BD->sites->subnets structure
+  - name: Build flattened BD subnet list
+    set_fact:
+      bd_subnet_list: |
+        {% set result = [] %}
+        {% for bd in ndo_schema_data.bridge_domains %}
+          {% if bd.sites is defined %}
+            {% for site in bd.sites %}
+              {% if site.subnets is defined %}
+                {% for subnet in site.subnets %}
+                  {% set _ = result.append({'schema': bd.schema, 'template': bd.template, 'bd': bd.name, 'site': site.name, 'subnet': subnet.ip, 'subnet_scope':subnet.scope}) %}
+                {% endfor %}
+              {% endif %}
+            {% endfor %}
+          {% endif %}
+        {% endfor %}
+        {{ result }}
+    tags: add_bd_subnet
+
+  # https://docs.ansible.com/projects/ansible/latest/collections/cisco/mso/mso_schema_site_bd_subnet_module.html#ansible-collections-cisco-mso-mso-schema-site-bd-subnet-module
+  - name: Add a new site BD subnet
+    cisco.mso.mso_schema_site_bd_subnet:
+      <<: *nd_login
+      schema: "{{ item.schema }}"
+      site: "{{ item.site }}"
+      template: "{{ item.template }}"
+      bd: "{{ item.bd }}"
+      subnet: "{{ item.subnet }}"
+      scope: "{{ item.subnet_scope }}"
+      state: "{{ target_state }}"    
+    loop: "{{ bd_subnet_list | from_yaml }}"
+    register: schema_results
+    tags: add_bd_subnet
+
+  - name: Add/Remove ANPs for selected environment
+    cisco.mso.mso_schema_template_anp:
+      <<: *nd_login
+      schema: "{{ item.schema }}"
+      template: "{{ item.template }}"
+      anp: "{{ item.name }}"
+      state: "{{ target_state }}"
+    loop: "{{ ndo_schema_data.anps }}"
+    register: schema_results
+    tags: add_anp
+  
+
+
+  - name: Add/Remove EPGs for selected environment
+    cisco.mso.mso_schema_template_anp_epg:
+      <<: *nd_login
+      schema: "{{ item.schema }}"
+      template: "{{ item.template }}"
+      description: "{{ item.description }}"
+      anp: "{{ item.ap }}"
+      epg: "{{ item.name }}"
+      bd:
+        name: "{{ item.bd }}"
+      state: "{{ target_state }}"
+    loop: "{{ ndo_schema_data.epgs }}"
+    register: schema_results
+    tags: add_epg
+
+  # Add Domain Profiles
+  # Flatten the nested EPG->sites->phys_domain_association structure
+  - name: Build flattened EPG physical domain association list
+    set_fact:
+      epg_phys_domain_list: |
+        {% set result = [] %}
+        {% for epg in ndo_schema_data.epgs %}
+          {% if epg.sites is defined %}
+            {% for site in epg.sites %}
+              {% if site.phys_domain_association is defined %}
+                {% for domain in site.phys_domain_association %}
+                  {% set _ = result.append({'schema': epg.schema, 'template': epg.template, 'anp': epg.ap, 'epg': epg.name, 'site': site.name, 'domain': domain}) %}
+                {% endfor %}
+              {% endif %}
+            {% endfor %}
+          {% endif %}
+        {% endfor %}
+        {{ result }}
+    tags: add_domain_profile
+
+  - name: Build flattened EPG VMM domain association list
+    set_fact:
+      epg_vmm_domain_list: |
+        {% set result = [] %}
+        {% for epg in ndo_schema_data.epgs %}
+          {% if epg.sites is defined %}
+            {% for site in epg.sites %}
+              {% if site.vmm_domain_association is defined %}
+                {% for domain in site.vmm_domain_association %}
+                  {% set _ = result.append({'schema': epg.schema, 'template': epg.template, 'anp': epg.ap, 'epg': epg.name, 'site': site.name, 'domain': domain}) %}
+                {% endfor %}
+              {% endif %}
+            {% endfor %}
+          {% endif %}
+        {% endfor %}
+        {{ result }}
+    tags: add_domain_profile
+
+  - name: Add physical domain to a site EPG
+    cisco.mso.mso_schema_site_anp_epg_domain:
+      <<: *nd_login
+      schema: "{{ item.schema }}"
+      site: "{{ item.site }}"
+      template: "{{ item.template }}"
+      anp: "{{ item.anp }}"
+      epg: "{{ item.epg }}"
+      domain_association_type: physicalDomain
+      domain_profile: "{{ item.domain }}"
+      state: "{{ target_state }}"
+      deployment_immediacy: immediate
+      resolution_immediacy: immediate
+    loop: "{{ epg_phys_domain_list | from_yaml }}"
+    register: schema_results
+    tags: add_domain_profile
+
+  - name: Add vmm domain to a site EPG
+    cisco.mso.mso_schema_site_anp_epg_domain:
+      <<: *nd_login
+      schema: "{{ item.schema }}"
+      site: "{{ item.site }}"
+      template: "{{ item.template }}"
+      anp: "{{ item.anp }}"
+      epg: "{{ item.epg }}"
+      domain_association_type: vmmDomain
+      domain_profile: "{{ item.domain }}"
+      deployment_immediacy: immediate
+      resolution_immediacy: lazy
+      state: "{{ target_state }}"
+    loop: "{{ epg_vmm_domain_list | from_yaml }}"
+    register: schema_results
+    tags: add_domain_profile
+
+  - name: Deploy modified schemas
+    cisco.mso.ndo_schema_template_deploy:
+      <<: *nd_login
+      schema: "{{ item.item.schema }}"
+      template: "{{ item.item.template }}"
+      state: deploy
+    loop: "{{ schema_results.results | selectattr('changed', 'equalto', true) | list | unique(attribute='item.schema') }}"
+    when:
+      - schema_results is defined
+      - schema_results.results | selectattr('changed', 'equalto', true) | list | length > 0
+    ignore_errors: "{{ set_ignore_errors }}"
+    tags: deploy_schemas
