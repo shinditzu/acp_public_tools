@@ -1,0 +1,4 @@
+bd_name,site_name,subnet_ip,scope
+test_bd1,sim_site_1,2.2.2.1/24,public
+test_bd1,sim_site_1,2.2.3.1/24,private
+test_bd2,sim_site_1,3.3.3.1/24,public

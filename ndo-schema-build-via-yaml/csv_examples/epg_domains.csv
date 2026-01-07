@@ -1,0 +1,4 @@
+epg_name,site_name,domain_type,domain_name
+test_epg1,sim_site_1,physical,physical-nodes
+test_epg1,sim_site_1,vmm,vmm-test-dvs
+test_epg2,sim_site_1,physical,physical-nodes

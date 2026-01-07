@@ -1,0 +1,3 @@
+name,schema,template,ap,bd,description,vrf
+test_epg1,test_schema,test_template,test_ap,test_bd1,Test EPG 1,test_vrf
+test_epg2,test_schema,test_template,test_ap,test_bd2,Test EPG 2,test_vrf

@@ -1,0 +1,70 @@
+# Auto-generated from CSV files
+ndo_schema_data:
+  vrfs:
+  - name: test_vrf
+    schema: test_schema
+    template: test_template
+  bridge_domains:
+  - name: test_bd1
+    schema: test_schema
+    template: test_template
+    vrf: test_vrf
+    layer2_stretch: false
+    unicast_routing: true
+    sites:
+    - name: sim_site_1
+      subnets:
+      - ip: 2.2.2.1/24
+        scope: public
+      - ip: 2.2.3.1/24
+        scope: private
+      l3outs: null
+  - name: test_bd2
+    schema: test_schema
+    template: test_template
+    vrf: test_vrf
+    layer2_stretch: false
+    unicast_routing: true
+    sites:
+    - name: sim_site_1
+      subnets:
+      - ip: 3.3.3.1/24
+        scope: public
+      l3outs: null
+  - name: test_bd3
+    schema: test_schema
+    template: test_template
+    vrf: test_vrf
+    layer2_stretch: false
+    unicast_routing: false
+    sites: []
+  anps:
+  - name: test_ap
+    schema: test_schema
+    template: test_template
+  epgs:
+  - name: test_epg1
+    schema: test_schema
+    template: test_template
+    ap: test_ap
+    bd: test_bd1
+    description: Test EPG 1
+    vrf: test_vrf
+    sites:
+    - name: sim_site_1
+      phys_domain_association:
+      - physical-nodes
+      vmm_domain_association:
+      - vmm-test-dvs
+  - name: test_epg2
+    schema: test_schema
+    template: test_template
+    ap: test_ap
+    bd: test_bd2
+    description: Test EPG 2
+    vrf: test_vrf
+    sites:
+    - name: sim_site_1
+      phys_domain_association:
+      - physical-nodes
+      vmm_domain_association: []

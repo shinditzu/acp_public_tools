@@ -1,0 +1,4 @@
+name,schema,template,vrf,layer2_stretch,unicast_routing
+test_bd1,test_schema,test_template,test_vrf,false,true
+test_bd2,test_schema,test_template,test_vrf,false,true
+test_bd3,test_schema,test_template,test_vrf,false,false
