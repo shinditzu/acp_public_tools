@@ -1,0 +1,3 @@
+﻿EPG name,EPG AP,EPG schema,EPG template,binding_type,VlanID,wave,target_dvs,target_site
+test_epg1,test_ap,test_schema,test_template,dynamic,100,1,test_site1_dvs,sim_site_1
+test_epg2,test_ap,test_schema,test_template,dynamic,101,1,test_site1_dvs,sim_site_1

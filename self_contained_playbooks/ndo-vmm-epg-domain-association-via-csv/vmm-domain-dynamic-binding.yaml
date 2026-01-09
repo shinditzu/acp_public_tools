@@ -1,0 +1,125 @@
+---
+- name: VMM Domain Binding Dynamic
+  hosts: localhost
+  gather_facts: no
+  connection: local
+
+  # vars_prompt:
+  #   - name: nd_hostname
+  #     prompt: "Enter ND Fabric IP/Hostname"
+  #     private: no
+
+  #   - name: nd_username
+  #     prompt: "Enter Username"
+  #     private: no
+
+  #   - name: nd_password
+  #     prompt: "Enter Password"
+  #     private: yes
+  
+  vars:
+    #target_site: "{{ site | default('Site1') }}"
+    #target_dvs: "{{ dvs | default('DVS-ASH-QFX') }}"
+    target_state: "{{ state | default('present') }}"
+    wave: "{{ wave | default('1') }}"
+    #binding_type: "{{ binding | default('static') }}"  # static, dynamic, or default
+    
+    nd_creds: &nd_login
+      hostname: "{{ nd_hostname | default('192.168.15.102') }}" 
+      use_proxy: no
+      use_ssl: yes
+      username: "{{ nd_username | default('admin') }}"
+      password: "{{ nd_password | default('Cisco123!') }}"
+      login_domain: '{{ nd_login_domain | default(omit) }}'
+      validate_certs: no
+    ansible_connection: ansible.netcommon.httpapi
+    ansible_network_os: cisco.nd.nd
+    ansible_httpapi_use_ssl: True
+
+  tasks:
+    - name: Load CSV file with EPG data
+      community.general.read_csv:
+        path: "{{ playbook_dir }}/epg-vmm-domain-associations.csv"
+      register: vmm_vars
+      tags: always
+
+    - name: Debug - Show loaded EPG count
+      debug:
+        msg: "Loaded {{ vmm_vars.list | length }} EPGs from CSV"
+      tags: always
+
+    # https://galaxy.ansible.com/ui/repo/published/cisco/mso/content/module/mso_schema_site_anp_epg_domain/
+    - name: Query VMM domain binding for EPGs
+      cisco.mso.mso_schema_site_anp_epg_domain:
+        <<: *nd_login
+        schema: "{{ item['EPG schema'] }}"
+        site: "{{ item['target_site'] }}"
+        template: "{{ item['EPG template'] }}"
+        anp: "{{ item['EPG AP'] }}"
+        epg: "{{ item['EPG name'] }}"
+        domain_association_type: vmmDomain
+        domain_profile: "{{ target_dvs }}"
+        deployment_immediacy: immediate
+        resolution_immediacy: lazy
+        vlan_encap_mode: dynamic
+        state: "query"
+      loop: "{{ vmm_vars.list }}"
+      register: vmm_binding_results
+      tags: [never, debug]
+
+    - name: Debug - Show query results
+      debug:
+        var: vmm_binding_results
+      tags: [never, debug]
+
+    # Step 2: Re-add VMM domain bindings with dynamic VLAN mode
+    - name: Add VMM domain binding for EPGs with dynamic mode
+      cisco.mso.mso_schema_site_anp_epg_domain:
+        <<: *nd_login
+        schema: "{{ item['EPG schema'] }}"
+        site: "{{ item['target_site'] }}"
+        template: "{{ item['EPG template'] }}"
+        anp: "{{ item['EPG AP'] }}"
+        epg: "{{ item['EPG name'] }}"
+        domain_association_type: vmmDomain
+        domain_profile: "{{ item['target_dvs'] }}"
+        deployment_immediacy: immediate
+        resolution_immediacy: lazy
+        vlan_encap_mode: dynamic
+        state: "present"
+      loop: "{{ vmm_vars.list | selectattr('wave', 'equalto', wave) | list }}"
+      register: vmm_binding_results
+      tags: update_vmm_binding
+
+    - name: Deploy modified schemas
+      cisco.mso.ndo_schema_template_deploy:
+        <<: *nd_login
+        schema: "{{ item['EPG schema'] }}"
+        template: "{{ item['EPG template'] }}"
+        state: deploy
+      loop: "{{ vmm_binding_results.results | selectattr('changed', 'equalto', true) | map(attribute='item') | unique(attribute='EPG schema') | list }}"
+      when:
+        - vmm_binding_results is defined
+        - vmm_binding_results.results | selectattr('changed', 'equalto', true) | list | length > 0
+      register: schema_deploy_results
+      tags: deploy_schemas
+
+    - name: Debug - Show deploy results structure
+      debug:
+        msg:
+          - "Results count: {{ schema_deploy_results.results | default([]) | length }}"
+          - "Results: {{ schema_deploy_results.results | default([]) }}"
+      when: schema_deploy_results is defined
+      tags: update_vmm_binding
+
+    - name: Summary
+      debug:
+        msg:
+          - "Total EPGs processed: {{ vmm_binding_results.results | length }}"
+          - "Changed: {{ vmm_binding_results.results | selectattr('changed', 'equalto', true) | list | length }}"
+          - "Failed: {{ vmm_binding_results.results | selectattr('failed', 'defined') | selectattr('failed', 'equalto', true) | list | length }}"
+          - "Schema Deployments Attempted: {{ schema_deploy_results.results | default([]) | length }}"
+          - "Schema Deploy Successful: {{ (schema_deploy_results.results | default([])) | rejectattr('failed', 'equalto', true) | rejectattr('skipped', 'defined') | list | length }}"
+          - "Schema Deploy Failed: {{ (schema_deploy_results.results | default([])) | selectattr('failed', 'equalto', true) | list | length }}"
+      tags: always
+

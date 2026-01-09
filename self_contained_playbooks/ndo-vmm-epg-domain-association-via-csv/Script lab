@@ -1,0 +1,2 @@
+Execute
+ansible-playbook vmm-domain-dynamic-binding.yaml -e "wave=1"

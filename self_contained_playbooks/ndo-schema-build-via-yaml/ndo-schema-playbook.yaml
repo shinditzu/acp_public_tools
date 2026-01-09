@@ -32,6 +32,7 @@
       use_ssl: yes
       username: "{{ nd_username | default('admin') }}"
       password: "{{ nd_password | default('Cisco123!') }}"
+      login_domain: '{{ nd_login_domain | default(omit) }}'
       validate_certs: no
     ansible_connection: ansible.netcommon.httpapi
     ansible_network_os: cisco.nd.nd
